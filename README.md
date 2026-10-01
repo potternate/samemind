@@ -8,6 +8,12 @@ You and the AI each pick a word connecting two endpoints. Different words become
 
 Choose **Daily** for one free shared puzzle each UTC day, or **Unlimited** for as many random starting pairs as you want. **Your Scores** keeps Daily and Unlimited results separate, with games played, win percentage, best round count, average winning rounds, and recent results.
 
+## Play
+
+[Open the hosted development preview](https://3000--19b87eb205594217889a36a6c5371d9f.preview.devinapps.com).
+
+This Devin preview requires sign-in and write access to the session, and is available while the session is awake. It currently uses mock AI with local Supabase storage.
+
 ## Stack
 
 Next.js (App Router) · TypeScript · Tailwind CSS 4 · shadcn/ui · Supabase · OpenAI · Vercel
