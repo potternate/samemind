@@ -4,11 +4,14 @@ import { copyText, shareText } from "./share";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("sharing", () => {
-  it("calls native share immediately with text, title and URL", async () => {
+  it("calls native share immediately with the whole message in one text item", async () => {
     const share = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { share });
-    const operation = shareText("SAME MIND #1", "https://example.com");
-    expect(share).toHaveBeenCalledWith({ title: "Same Mind", text: "SAME MIND #1", url: "https://example.com" });
+    const operation = shareText("Same Mind #2\n2/8\n\n⬜⬜ 🟩🟩", "https://example.com");
+    expect(share).toHaveBeenCalledWith({
+      title: "Same Mind #2",
+      text: "Same Mind #2\n2/8\n\n⬜⬜ 🟩🟩\nhttps://example.com",
+    });
     expect(await operation).toBe("shared");
   });
 

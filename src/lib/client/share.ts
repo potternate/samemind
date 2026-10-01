@@ -10,9 +10,10 @@ export async function copyText(text: string): Promise<"copied" | "failed"> {
 }
 
 export async function shareText(text: string, url?: string): Promise<ShareOutcome> {
+  const message = url ? `${text}\n${url}` : text;
   if (typeof navigator.share === "function") {
     try {
-      await navigator.share({ title: "Same Mind", text, ...(url ? { url } : {}) });
+      await navigator.share({ title: text.split("\n")[0] || "Same Mind", text: message });
       return "shared";
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return "cancelled";
@@ -20,5 +21,5 @@ export async function shareText(text: string, url?: string): Promise<ShareOutcom
       return "failed";
     }
   }
-  return copyText(url ? `${text}\n${url}` : text);
+  return copyText(message);
 }

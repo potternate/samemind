@@ -1,4 +1,4 @@
-import { DAILY_EPOCH } from "./config";
+import { DAILY_EPOCH, DAILY_PAIR_EPOCH } from "./config";
 import { STARTING_PAIRS } from "./pairs";
 import type { StartingPair } from "./types";
 
@@ -19,7 +19,8 @@ export function puzzleNumberForDate(date: string): number {
 
 export function pairForPuzzle(puzzleNumber: number): StartingPair {
   const n = STARTING_PAIRS.length;
-  return STARTING_PAIRS[(((puzzleNumber - 1) % n) + n) % n];
+  const index = puzzleNumber - puzzleNumberForDate(DAILY_PAIR_EPOCH);
+  return STARTING_PAIRS[((index % n) + n) % n];
 }
 
 export function dailyPuzzle(now: Date = new Date()) {
