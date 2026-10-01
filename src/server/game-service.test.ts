@@ -30,6 +30,7 @@ describe("daily games and normalized first guesses", () => {
   it("shares the UTC puzzle between players and resumes one attempt per player", async () => {
     const playerId = crypto.randomUUID();
     const game = await startGame({ playerId, mode: "daily" });
+    expect(game.puzzleNumber).toBe(2);
     const other = await startGame({ playerId: crypto.randomUUID(), mode: "daily" });
     expect(other.startPair).toEqual(game.startPair);
     expect(other.puzzleNumber).toBe(game.puzzleNumber);
@@ -39,7 +40,7 @@ describe("daily games and normalized first guesses", () => {
     vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
     const tomorrow = await startGame({ playerId, mode: "daily" });
     expect(tomorrow.id).not.toBe(game.id);
-    expect(tomorrow.puzzleNumber).toBe(2);
+    expect(tomorrow.puzzleNumber).toBe(3);
   });
 
   it("starts a new Unlimited game on every request", async () => {
