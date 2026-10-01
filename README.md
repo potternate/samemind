@@ -1,0 +1,2 @@
+# samemind
+samemind.io
