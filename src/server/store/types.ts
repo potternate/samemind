@@ -17,6 +17,8 @@ export interface SubmitAnswerInput {
   playerId: string;
   roundNumber: number;
   answer: string;
+  exactAnswer?: string;
+  boardAttempts?: number;
   maxRounds: number;
   semanticMatched?: boolean;
 }
@@ -25,7 +27,7 @@ export type SubmitAnswerResult =
   | { ok: true; matched: boolean; status: GameStatus; aiAnswer: string }
   | {
       ok: false;
-      code: "not_found" | "forbidden" | "not_active" | "wrong_round" | "already_submitted" | "ai_not_ready";
+      code: "not_found" | "forbidden" | "not_active" | "wrong_round" | "already_submitted" | "ai_not_ready" | "board_changed";
     };
 
 export interface AnalyticsEvent {
@@ -53,6 +55,8 @@ export interface GameStore {
   findDailyGame(playerId: string, puzzleDate: string): Promise<GameRecord | null>;
   getPlayerScores(playerId: string, dailyDate: string): Promise<PlayerScores>;
   getFirstGuesses(boardKey: string): Promise<FirstGuessBoard>;
+  getFirstGuessWords(boardKey: string): Promise<string[]>;
+  consumeAiQuota(playerId: string, playerLimit: number, globalLimit: number): Promise<boolean>;
   getRounds(gameId: string): Promise<RoundRecord[]>;
   /** Sets the AI answer only if none is stored yet. Returns the stored answer. */
   setAiAnswer(roundId: string, aiAnswer: string): Promise<string>;

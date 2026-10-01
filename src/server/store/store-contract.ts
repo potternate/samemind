@@ -110,5 +110,13 @@ export function describeStoreContract(name: string, makeStore: () => GameStore) 
       const { game, playerId } = await startGame(store);
       await expect(store.insertEvent({ name: "game_started", playerId, gameId: game.id, properties: { mode: "practice" } })).resolves.toBeUndefined();
     });
+
+    it("enforces per-player AI quotas", async () => {
+      const store = makeStore();
+      const playerId = newPlayer();
+      expect(await store.consumeAiQuota(playerId, 2, 5_000)).toBe(true);
+      expect(await store.consumeAiQuota(playerId, 2, 5_000)).toBe(true);
+      expect(await store.consumeAiQuota(playerId, 2, 5_000)).toBe(false);
+    });
   });
 }

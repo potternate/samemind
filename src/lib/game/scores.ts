@@ -41,9 +41,14 @@ function modeScores(games: GameRecord[]): ModeScores {
 export function playerScores(games: GameRecord[], dailyDate: string): PlayerScores {
   const completed = games.filter((game) => game.status !== "active" && game.completedAt !== null);
   const dailyGame = games.find((game) => game.mode === "daily" && game.puzzleDate === dailyDate);
-  const recent: ScoreEntry[] = completed
+  const recentGames = (["daily", "unlimited"] as const).flatMap((mode) =>
+    completed
+      .filter((game) => (game.mode === "daily" ? "daily" : "unlimited") === mode)
+      .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "") || b.id.localeCompare(a.id))
+      .slice(0, 10),
+  );
+  const recent: ScoreEntry[] = recentGames
     .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "") || b.id.localeCompare(a.id))
-    .slice(0, 10)
     .map((game) => ({
       id: game.id,
       mode: game.mode,

@@ -40,6 +40,8 @@ See `.env.example`. All variables are server-only.
 | `OPENAI_API_KEY` | AI player (required in production) |
 | `OPENAI_MODEL` | Default `gpt-4.1-mini` |
 | `OPENAI_TEMPERATURE` | Default `0.2`; `none` to omit |
+| `AI_REQUESTS_PER_PLAYER_HOUR` | AI generation/judging request limit per player; default `120` |
+| `AI_REQUESTS_GLOBAL_HOUR` | AI generation/judging request limit across all players; default `5000` |
 | `CONNECT_TWO_SYSTEM_PROMPT` | Override the AI system prompt (`src/server/ai/prompt.ts`) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Persistence (required in production) |
 
@@ -63,7 +65,11 @@ Daily puzzle: `puzzle # = days since 2026-10-01 + 1`, pair chosen deterministica
 
 First-round guesses are corrected to single canonical words by an LLM. Equivalent existing board words reuse the existing entry. Every new accepted first guess starts at 1; matching canonical guesses from other players increment that count. Daily boards are grouped by puzzle date, Unlimited boards by starting pair. Counts are updated in the submission transaction so concurrent retries cannot count twice. Existing first-round submissions are backfilled by the migration. Boards are only sent after the player has submitted their first guess.
 
-First-round wins use the corrected word's exact match with the AI. Later rounds accept spelling variants, inflections and synonyms expressing the same concept in context; related but distinct concepts stay mismatches. Both revealed words remain visible even when a semantic match wins.
+First-round wins accept an exact match with either the normalized original guess or its corrected board word. Later rounds accept spelling variants, inflections and synonyms expressing the same concept in context; related but distinct concepts stay mismatches. Both revealed words remain visible even when a semantic match wins.
+
+Supabase atomically enforces hourly AI request quotas before generation or judging, including concurrent calls from different server instances. Exceeding either limit returns HTTP 429; unanswered rounds remain retryable. Quotas reset on UTC hour boundaries and include failed model attempts.
+
+First-guess writes check the board's attempt count while holding a transaction-scoped board lock. If another player commits during judging, the server rejudges against the updated vocabulary, up to three times, before asking the player to retry. Stale judgments never change the round or count.
 
 Sharing calls `navigator.share({ title, text, url })` directly from the tap, before analytics. On HTTPS Safari this requests the iPhone's native share sheet. If a containing iframe blocks Web Share, the result screen offers **Open game to share** in a separate tab. Unsupported browsers fall back to clipboard; **Copy result** is also available, with selectable text if clipboard access is denied. Cancelling the sheet is not treated as an error. Physical iOS sharing still needs verification on an iPhone.
 

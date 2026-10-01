@@ -11,11 +11,25 @@ import type { AnswerReview } from "./ai/types";
 import { track } from "./analytics";
 import { GameError } from "./errors";
 import { getStore } from "./store";
-import { DuplicateDailyGameError } from "./store/types";
+import { DuplicateDailyGameError, type SubmitAnswerResult } from "./store/types";
 
 export interface StartGameInput {
   playerId: string;
   mode: GameMode;
+}
+
+function positiveLimit(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+async function assertAiQuota(playerId: string): Promise<void> {
+  const allowed = await getStore().consumeAiQuota(
+    playerId,
+    positiveLimit("AI_REQUESTS_PER_PLAYER_HOUR", 120),
+    positiveLimit("AI_REQUESTS_GLOBAL_HOUR", 5_000),
+  );
+  if (!allowed) throw new GameError("rate_limited", "Too many AI requests. Try again later.");
 }
 
 async function loadView(game: GameRecord): Promise<GameView> {
@@ -93,6 +107,11 @@ export async function getGame(playerId: string, gameId: string): Promise<GameVie
   return loadView(await loadOwnedGame(playerId, gameId));
 }
 
+export async function trackShare(playerId: string, gameId: string): Promise<void> {
+  await loadOwnedGame(playerId, gameId);
+  await track({ name: "share_clicked", playerId, gameId });
+}
+
 /**
  * Ensures the AI has committed an answer for the current round. Idempotent:
  * safe to call repeatedly and concurrently; the first stored answer wins.
@@ -106,6 +125,7 @@ export async function prepareRound(playerId: string, gameId: string): Promise<Ga
   if (!current) throw new GameError("internal", "Current round is missing.");
   if (current.aiAnswer === null) {
     let word: string;
+    await assertAiQuota(playerId);
     try {
       word = await getAiPlayer().chooseWord({ wordA: current.wordA, wordB: current.wordB });
     } catch (err) {
@@ -143,34 +163,46 @@ export async function submitAnswer(input: SubmitInput): Promise<SubmitResult> {
   if (!validation.ok) throw new GameError("invalid_answer", validation.error);
 
   if (current.aiAnswer === null) throw new GameError("ai_unavailable", "The AI hasn't picked its word yet. Try again.");
-  const board = input.roundNumber === 1 ? await store.getFirstGuesses(firstGuessBoardKey(game)) : null;
-  let review: AnswerReview;
-  try {
-    review = await getAnswerJudge().reviewAnswer({
-      answer: validation.word,
-      wordA: current.wordA,
-      wordB: current.wordB,
-      aiAnswer: current.aiAnswer,
+  let playerAnswer = validation.word;
+  let result: SubmitAnswerResult = { ok: false, code: "board_changed" };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const boardKey = firstGuessBoardKey(game);
+    const boardAttempts = input.roundNumber === 1 ? (await store.getFirstGuesses(boardKey)).attempts : undefined;
+    const boardWords = input.roundNumber === 1 ? await store.getFirstGuessWords(boardKey) : [];
+    let review: AnswerReview;
+    await assertAiQuota(input.playerId);
+    try {
+      review = await getAnswerJudge().reviewAnswer({
+        answer: validation.word,
+        wordA: current.wordA,
+        wordB: current.wordB,
+        aiAnswer: current.aiAnswer,
+        roundNumber: input.roundNumber,
+        boardWords,
+      });
+    } catch (err) {
+      console.error("[connect-two] guess review failed", err instanceof Error ? err.message : "Unknown error");
+      throw new GameError("ai_unavailable", "Couldn't check your guess. Your turn is saved—try again.");
+    }
+    const corrected = validateAnswer(review.word, [current.wordA, current.wordB]);
+    if (!corrected.ok) throw new GameError("invalid_answer", corrected.error);
+    playerAnswer = corrected.word;
+    result = await store.submitAnswer({
+      gameId: game.id,
+      playerId: input.playerId,
       roundNumber: input.roundNumber,
-      boardWords: board?.guesses.map((guess) => guess.word) ?? [],
+      answer: playerAnswer,
+      exactAnswer: validation.word,
+      boardAttempts,
+      maxRounds: MAX_ROUNDS,
+      semanticMatched: input.roundNumber > 1 && review.semanticMatch,
     });
-  } catch (err) {
-    console.error("[connect-two] guess review failed", err instanceof Error ? err.message : "Unknown error");
-    throw new GameError("ai_unavailable", "Couldn't check your guess. Your turn is saved—try again.");
+    if (result.ok || result.code !== "board_changed") break;
   }
-  const corrected = validateAnswer(review.word, [current.wordA, current.wordB]);
-  if (!corrected.ok) throw new GameError("invalid_answer", corrected.error);
-
-  const result = await store.submitAnswer({
-    gameId: game.id,
-    playerId: input.playerId,
-    roundNumber: input.roundNumber,
-    answer: corrected.word,
-    maxRounds: MAX_ROUNDS,
-    semanticMatched: input.roundNumber > 1 && review.semanticMatch,
-  });
   if (!result.ok) {
     switch (result.code) {
+      case "board_changed":
+        throw new GameError("ai_unavailable", "The guess board is busy. Your turn is saved—try again.");
       case "not_found":
       case "forbidden":
         throw new GameError("not_found", "Game not found.");
@@ -193,7 +225,7 @@ export async function submitAnswer(input: SubmitInput): Promise<SubmitResult> {
     game: await loadView(updated),
     reveal: {
       roundNumber: input.roundNumber,
-      playerAnswer: corrected.word,
+      playerAnswer,
       aiAnswer: result.aiAnswer,
       matched: result.matched,
     },

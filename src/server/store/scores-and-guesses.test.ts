@@ -40,6 +40,23 @@ for (const factory of stores) {
       expect((await store.getPlayerScores(crypto.randomUUID(), "2026-10-01")).recent).toEqual([]);
     });
 
+    it("keeps recent results for each mode", async () => {
+      const store = factory.create();
+      const input = newInput();
+      await submit(
+        store,
+        { ...input, mode: "daily", puzzleDate: "2026-10-01", puzzleNumber: 1 },
+        "fire",
+        "fire",
+      );
+      for (let index = 0; index < 11; index += 1) {
+        await submit(store, { ...input, wordA: crypto.randomUUID() }, "water", "water");
+      }
+      const recent = (await store.getPlayerScores(input.playerId, "2026-10-01")).recent;
+      expect(recent.filter((game) => game.mode === "daily")).toHaveLength(1);
+      expect(recent.filter((game) => game.mode !== "daily")).toHaveLength(10);
+    });
+
     it("counts shared first guesses once even with duplicate submits", async () => {
       const store = factory.create();
       const input = newInput();
@@ -52,6 +69,61 @@ for (const factory of stores) {
       expect(await store.getFirstGuesses(firstGuessBoardKey(game))).toEqual({ attempts: 1, guesses: [{ word: "boat", count: 1 }] });
       await submit(store, { ...input, playerId: crypto.randomUUID() }, "boat", "water");
       expect(await store.getFirstGuesses(firstGuessBoardKey(game))).toEqual({ attempts: 2, guesses: [{ word: "boat", count: 2 }] });
+    });
+
+    it("keeps low-ranked canonical words available to the judge", async () => {
+      const store = factory.create();
+      const input = newInput();
+      const words = Array.from({ length: 201 }, (_, index) =>
+        `guess${String.fromCharCode(97 + Math.floor(index / 26))}${String.fromCharCode(97 + index % 26)}`,
+      );
+      const games = await Promise.all(words.map((word) => submit(store, input, word, "water")));
+      const boardKey = firstGuessBoardKey(games[0]);
+      expect((await store.getFirstGuesses(boardKey)).guesses).toHaveLength(200);
+      expect(await store.getFirstGuessWords(boardKey)).toEqual(words);
+    });
+
+    it("rejects stale board judgments without changing a round or count", async () => {
+      const store = factory.create();
+      const input = newInput();
+      const games = await Promise.all([store.createGame(input), store.createGame(input)]);
+      for (const game of games) {
+        const [round] = await store.getRounds(game.id);
+        await store.setAiAnswer(round.id, "water");
+      }
+      const submissions = games.map((game, index) => ({
+        gameId: game.id, playerId: input.playerId, roundNumber: 1,
+        answer: ["boat", "ship"][index], boardAttempts: 0, maxRounds: 8,
+      }));
+      const results = await Promise.all(submissions.map((submission) => store.submitAnswer(submission)));
+      expect(results.filter((result) => result.ok)).toHaveLength(1);
+      const retryIndex = results.findIndex((result) => !result.ok && result.code === "board_changed");
+      expect(retryIndex).toBeGreaterThanOrEqual(0);
+      const board = await store.getFirstGuesses(firstGuessBoardKey(games[0]));
+      expect(board.attempts).toBe(1);
+      expect((await store.getRounds(games[retryIndex].id))[0].playerAnswer).toBeNull();
+      expect(await store.submitAnswer({
+        ...submissions[retryIndex], answer: board.guesses[0].word, boardAttempts: 1,
+      })).toMatchObject({ ok: true });
+      expect(await store.getFirstGuesses(firstGuessBoardKey(games[0]))).toEqual({
+        attempts: 2, guesses: [{ word: board.guesses[0].word, count: 2 }],
+      });
+    });
+
+    it("preserves exact wins when the stored board word differs", async () => {
+      const store = factory.create();
+      const input = newInput();
+      const game = await store.createGame(input);
+      const [round] = await store.getRounds(game.id);
+      await store.setAiAnswer(round.id, "boats");
+      expect(await store.submitAnswer({
+        gameId: game.id,
+        playerId: input.playerId,
+        roundNumber: 1,
+        answer: "boat",
+        exactAnswer: "boats",
+        maxRounds: 8,
+      })).toMatchObject({ ok: true, matched: true, status: "won" });
     });
 
     it("uses semantic judgments only after round one", async () => {

@@ -16,6 +16,7 @@ export class MemoryStore implements GameStore {
   private games = new Map<string, GameRecord>();
   private rounds = new Map<string, RoundRecord>();
   private firstGuesses = new Map<string, Map<string, number>>();
+  private aiUsage = new Map<string, number>();
   readonly events: (AnalyticsEvent & { createdAt: string })[] = [];
 
   async createGame(input: NewGameInput): Promise<GameRecord> {
@@ -79,6 +80,22 @@ export class MemoryStore implements GameStore {
     };
   }
 
+  async getFirstGuessWords(boardKey: string): Promise<string[]> {
+    return [...(this.firstGuesses.get(boardKey) ?? new Map<string, number>()).keys()].sort();
+  }
+
+  async consumeAiQuota(playerId: string, playerLimit: number, globalLimit: number): Promise<boolean> {
+    const window = new Date().toISOString().slice(0, 13);
+    const playerKey = `${window}:player:${playerId}`;
+    const globalKey = `${window}:global`;
+    const playerCount = this.aiUsage.get(playerKey) ?? 0;
+    const globalCount = this.aiUsage.get(globalKey) ?? 0;
+    if (playerCount >= playerLimit || globalCount >= globalLimit) return false;
+    this.aiUsage.set(playerKey, playerCount + 1);
+    this.aiUsage.set(globalKey, globalCount + 1);
+    return true;
+  }
+
   async setAiAnswer(roundId: string, aiAnswer: string): Promise<string> {
     const round = this.rounds.get(roundId);
     if (!round) throw new Error(`Round ${roundId} not found`);
@@ -97,10 +114,16 @@ export class MemoryStore implements GameStore {
     );
     if (!round || round.aiAnswer === null) return { ok: false, code: "ai_not_ready" };
     if (round.playerAnswer !== null) return { ok: false, code: "already_submitted" };
+    if (input.roundNumber === 1 && input.boardAttempts !== undefined) {
+      const board = this.firstGuesses.get(firstGuessBoardKey(game));
+      const attempts = [...(board?.values() ?? [])].reduce((sum, count) => sum + count, 0);
+      if (attempts !== input.boardAttempts) return { ok: false, code: "board_changed" };
+    }
 
     const outcome = resolveSubmission({
       roundNumber: input.roundNumber,
       playerAnswer: input.answer,
+      exactAnswer: input.exactAnswer,
       aiAnswer: round.aiAnswer,
       maxRounds: input.maxRounds,
       semanticMatched: input.semanticMatched,

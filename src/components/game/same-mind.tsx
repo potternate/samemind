@@ -125,9 +125,6 @@ export function SameMind() {
         if (err instanceof ApiError && err.code === "conflict") {
           const { game: fresh } = await api.getGame(game.id).catch(() => ({ game }));
           showGame(fresh);
-        } else if (err instanceof ApiError && err.code === "ai_unavailable") {
-          setGame({ ...game, current: { ...game.current, ready: false } });
-          setPrepareError(err.message);
         } else {
           setSubmitError(messageOf(err));
         }

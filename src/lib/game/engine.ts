@@ -3,6 +3,7 @@ import type { GameStatus } from "./types";
 export interface SubmissionInput {
   roundNumber: number;
   playerAnswer: string;
+  exactAnswer?: string;
   aiAnswer: string;
   maxRounds: number;
   semanticMatched?: boolean;
@@ -22,11 +23,12 @@ export interface SubmissionOutcome {
 export function resolveSubmission({
   roundNumber,
   playerAnswer,
+  exactAnswer,
   aiAnswer,
   maxRounds,
   semanticMatched,
 }: SubmissionInput): SubmissionOutcome {
-  const matched = playerAnswer === aiAnswer || (roundNumber > 1 && semanticMatched === true);
+  const matched = playerAnswer === aiAnswer || exactAnswer === aiAnswer || (roundNumber > 1 && semanticMatched === true);
   if (matched) return { matched, status: "won", nextRound: null };
   if (roundNumber >= maxRounds) return { matched, status: "lost", nextRound: null };
   return {

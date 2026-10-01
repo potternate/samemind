@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockAnswerJudge } from "./ai/mock-judge";
+import type { ReviewAnswerInput } from "./ai/types";
 import { MemoryStore } from "./store/memory-store";
 import { firstGuessBoardKey } from "@/lib/game/first-guesses";
-import { getGame, prepareRound, startGame, submitAnswer } from "./game-service";
+import { getGame, prepareRound, startGame, submitAnswer, trackShare } from "./game-service";
 
 const { chooseWord, reviewAnswer } = vi.hoisted(() => ({
   chooseWord: vi.fn(),
@@ -49,6 +50,14 @@ describe("daily games and normalized first guesses", () => {
     expect(second.id).not.toBe(first.id);
   });
 
+  it("rejects new AI work when the quota is exhausted", async () => {
+    vi.spyOn(store, "consumeAiQuota").mockResolvedValueOnce(false);
+    await expect(startGame({ playerId: crypto.randomUUID(), mode: "unlimited" })).rejects.toMatchObject({
+      code: "rate_limited",
+    });
+    expect(chooseWord).not.toHaveBeenCalled();
+  });
+
   it("resumes the same daily game under simultaneous start requests", async () => {
     const playerId = crypto.randomUUID();
     const games = await Promise.all([startGame({ playerId, mode: "daily" }), startGame({ playerId, mode: "daily" })]);
@@ -84,6 +93,34 @@ describe("daily games and normalized first guesses", () => {
     expect(retry.game.firstGuesses?.attempts).toBe(1);
   });
 
+  it("rejudges simultaneous synonyms against the committed board", async () => {
+    const players = [crypto.randomUUID(), crypto.randomUUID()];
+    const games = await Promise.all(players.map((playerId) => startGame({ playerId, mode: "daily" })));
+    reviewAnswer.mockImplementation(async (input: ReviewAnswerInput) => ({
+      word: input.boardWords[0] ?? input.answer,
+      boardWord: input.boardWords[0] ?? null,
+      semanticMatch: false,
+    }));
+    await Promise.all(games.map((game, index) => submitAnswer({
+      playerId: players[index], gameId: game.id, roundNumber: 1, answer: ["boat", "ship"][index],
+    })));
+    expect(reviewAnswer).toHaveBeenCalledTimes(3);
+    expect((await getGame(players[0], games[0].id)).firstGuesses).toEqual({
+      attempts: 2, guesses: [{ word: "boat", count: 2 }],
+    });
+  });
+
+  it("leaves the turn unchanged after repeated board conflicts", async () => {
+    const playerId = crypto.randomUUID();
+    const game = await startGame({ playerId, mode: "daily" });
+    vi.spyOn(store, "submitAnswer").mockResolvedValue({ ok: false, code: "board_changed" });
+    await expect(submitAnswer({ playerId, gameId: game.id, roundNumber: 1, answer: "boat" })).rejects.toMatchObject({
+      code: "ai_unavailable",
+    });
+    expect(reviewAnswer).toHaveBeenCalledTimes(3);
+    expect((await getGame(playerId, game.id)).current).toMatchObject({ number: 1, ready: true });
+  });
+
   it("counts only one of concurrent duplicate submissions", async () => {
     const playerId = crypto.randomUUID();
     const game = await startGame({ playerId, mode: "daily" });
@@ -91,6 +128,25 @@ describe("daily games and normalized first guesses", () => {
     const results = await Promise.allSettled([submitAnswer(input), submitAnswer(input), submitAnswer(input)]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect((await getGame(playerId, game.id)).firstGuesses?.attempts).toBe(1);
+  });
+
+  it("records share events only for the game's owner", async () => {
+    const playerId = crypto.randomUUID();
+    const game = await startGame({ playerId, mode: "unlimited" });
+    await trackShare(playerId, game.id);
+    await expect(trackShare(crypto.randomUUID(), game.id)).rejects.toMatchObject({ code: "not_found" });
+    expect(store.events.filter((event) => event.name === "share_clicked")).toHaveLength(1);
+  });
+
+  it("wins when an identical plural is canonicalized for the board", async () => {
+    const playerId = crypto.randomUUID();
+    chooseWord.mockResolvedValueOnce("boats");
+    const game = await startGame({ playerId, mode: "daily" });
+    reviewAnswer.mockResolvedValueOnce({ word: "boat", boardWord: null, semanticMatch: false });
+    const result = await submitAnswer({ playerId, gameId: game.id, roundNumber: 1, answer: "Boats" });
+    expect(result.game.status).toBe("won");
+    expect(result.reveal).toMatchObject({ playerAnswer: "boat", aiAnswer: "boats", matched: true });
+    expect(result.game.firstGuesses?.guesses).toEqual([{ word: "boat", count: 1 }]);
   });
 });
 

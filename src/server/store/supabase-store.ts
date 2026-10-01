@@ -86,6 +86,7 @@ const SUBMIT_CODES = new Set([
   "wrong_round",
   "already_submitted",
   "ai_not_ready",
+  "board_changed",
 ] as const);
 
 type SubmitCode = Extract<SubmitAnswerResult, { ok: false }>["code"];
@@ -167,6 +168,33 @@ export class SupabaseStore implements GameStore {
     return data;
   }
 
+  async getFirstGuessWords(boardKey: string): Promise<string[]> {
+    const words: string[] = [];
+    const pageSize = 500;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await this.db
+        .from("first_guesses")
+        .select("word")
+        .eq("board_key", boardKey)
+        .order("word")
+        .range(offset, offset + pageSize - 1)
+        .returns<{ word: string }[]>();
+      if (error) throw new Error(`getFirstGuessWords failed: ${error.message}`);
+      words.push(...data.map(({ word }) => word));
+      if (data.length < pageSize) return words;
+    }
+  }
+
+  async consumeAiQuota(playerId: string, playerLimit: number, globalLimit: number): Promise<boolean> {
+    const { data, error } = await this.db.rpc("consume_ai_quota", {
+      p_player_id: playerId,
+      p_player_limit: playerLimit,
+      p_global_limit: globalLimit,
+    });
+    if (error) throw new Error(`consume_ai_quota failed: ${error.message}`);
+    return data === true;
+  }
+
   async setAiAnswer(roundId: string, aiAnswer: string): Promise<string> {
     const { error } = await this.db
       .from("rounds")
@@ -191,6 +219,8 @@ export class SupabaseStore implements GameStore {
         p_player_id: input.playerId,
         p_round_number: input.roundNumber,
         p_answer: input.answer,
+        p_exact_answer: input.exactAnswer ?? input.answer,
+        p_board_attempts: input.boardAttempts ?? null,
         p_max_rounds: input.maxRounds,
         p_semantic_matched: input.semanticMatched ?? false,
       })

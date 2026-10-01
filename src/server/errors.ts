@@ -4,6 +4,7 @@ export type GameErrorCode =
   | "not_found"
   | "conflict"
   | "ai_unavailable"
+  | "rate_limited"
   | "internal";
 
 const STATUS: Record<GameErrorCode, number> = {
@@ -12,6 +13,7 @@ const STATUS: Record<GameErrorCode, number> = {
   not_found: 404,
   conflict: 409,
   ai_unavailable: 503,
+  rate_limited: 429,
   internal: 500,
 };
 
